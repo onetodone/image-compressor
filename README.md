@@ -58,7 +58,7 @@ Uploads go to a real Cloudflare R2 bucket: fill in the `R2_*` variables in `.env
 docker compose up --build
 ```
 
-Compose also starts the Firebase Auth and Firestore emulators (ports 9099 and 8080), so the stack runs without a Google Cloud project. The API reads the `R2_*` variables from `.env`.
+Compose also starts the Firebase Auth and Firestore emulators (ports 9099 and 8080), so the stack runs without a Google Cloud project. The API and the worker read the `R2_*` variables from `.env`.
 
 ## Repository layout
 

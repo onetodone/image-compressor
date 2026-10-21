@@ -13,27 +13,40 @@ const apiEnv = {
   WORKER_URL: 'http://localhost:3002',
 }
 
+const workerEnv = {
+  GCP_PROJECT_ID: 'demo',
+  R2_ACCOUNT_ID: 'account',
+  R2_ACCESS_KEY_ID: 'key',
+  R2_SECRET_ACCESS_KEY: 'secret',
+  R2_BUCKET: 'bucket',
+  TASKS_MAX_ATTEMPTS: '5',
+}
+
 describe('parseConfig', () => {
   it('applies defaults for optional variables', () => {
-    const config = parseConfig(workerConfigSchema, { GCP_PROJECT_ID: 'demo' })
+    const config = parseConfig(workerConfigSchema, workerEnv)
 
-    expect(config).toEqual({
-      NODE_ENV: 'development',
-      PORT: 8080,
-      GCP_PROJECT_ID: 'demo',
-      SLOW_CALL_THRESHOLD_MS: 1000,
-    })
+    expect(config).toMatchObject({ NODE_ENV: 'development', PORT: 8080, SLOW_CALL_THRESHOLD_MS: 1000 })
   })
 
   it('coerces numeric variables', () => {
-    const config = parseConfig(workerConfigSchema, {
-      GCP_PROJECT_ID: 'demo',
-      PORT: '3002',
-      SLOW_CALL_THRESHOLD_MS: '250',
-    })
+    const config = parseConfig(workerConfigSchema, { ...workerEnv, PORT: '3002', SLOW_CALL_THRESHOLD_MS: '250' })
 
     expect(config.PORT).toBe(3002)
     expect(config.SLOW_CALL_THRESHOLD_MS).toBe(250)
+    expect(config.TASKS_MAX_ATTEMPTS).toBe(5)
+  })
+
+  it('requires the R2 credentials and the attempt limit for the worker', () => {
+    expect(() => parseConfig(workerConfigSchema, { GCP_PROJECT_ID: 'demo' })).toThrow(
+      /R2_ACCOUNT_ID[\s\S]*R2_BUCKET[\s\S]*TASKS_MAX_ATTEMPTS/,
+    )
+  })
+
+  it('rejects an attempt limit below one', () => {
+    expect(() => parseConfig(workerConfigSchema, { ...workerEnv, TASKS_MAX_ATTEMPTS: '0' })).toThrow(
+      /TASKS_MAX_ATTEMPTS/,
+    )
   })
 
   it('splits CORS origins into a trimmed list', () => {
