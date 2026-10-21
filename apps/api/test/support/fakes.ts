@@ -1,6 +1,8 @@
+import { ImageCdn } from '../../src/common/cloudinary/image-cdn.js'
 import {
+  type DownloadOptions,
   ObjectStorage,
-  type PresignedUpload,
+  type PresignedUrl,
   type StoredObject,
   type UploadConstraints,
 } from '../../src/common/r2/object-storage.js'
@@ -16,11 +18,22 @@ export class InMemoryObjectStorage extends ObjectStorage {
   readonly objects = new Map<string, InMemoryObject>()
   readonly presigned = new Map<string, UploadConstraints & { expiresInSeconds: number }>()
   /** Operations that fail as if R2 was unavailable, until removed. */
-  readonly unavailable = new Set<'get' | 'put'>()
+  readonly unavailable = new Set<'get' | 'put' | 'delete'>()
 
-  presignUpload(key: string, constraints: UploadConstraints, expiresInSeconds: number): Promise<PresignedUpload> {
+  presignUpload(key: string, constraints: UploadConstraints, expiresInSeconds: number): Promise<PresignedUrl> {
     this.presigned.set(key, { ...constraints, expiresInSeconds })
     const url = `https://storage.test/${key}?X-Amz-Signature=test`
+    return Promise.resolve({ url, expiresAt: new Date(Date.now() + expiresInSeconds * 1000) })
+  }
+
+  presignDownload(key: string, options: DownloadOptions, expiresInSeconds: number): Promise<PresignedUrl> {
+    const query = new URLSearchParams({
+      'response-content-type': options.contentType,
+      'response-content-disposition': options.contentDisposition,
+      'X-Amz-Expires': String(expiresInSeconds),
+      'X-Amz-Signature': 'test',
+    })
+    const url = `https://storage.test/${key}?${query.toString()}`
     return Promise.resolve({ url, expiresAt: new Date(Date.now() + expiresInSeconds * 1000) })
   }
 
@@ -37,6 +50,12 @@ export class InMemoryObjectStorage extends ObjectStorage {
   put(key: string, body: Buffer, contentType: string): Promise<void> {
     if (this.unavailable.has('put')) return Promise.reject(new Error('R2 is unavailable'))
     this.objects.set(key, { data: body, size: body.length, contentType })
+    return Promise.resolve()
+  }
+
+  delete(key: string): Promise<void> {
+    if (this.unavailable.has('delete')) return Promise.reject(new Error('R2 is unavailable'))
+    this.objects.delete(key)
     return Promise.resolve()
   }
 
@@ -58,5 +77,38 @@ export class RecordingTaskQueue extends TaskQueue {
   enqueueCompression(jobId: string): Promise<void> {
     this.enqueued.push(jobId)
     return Promise.resolve()
+  }
+}
+
+/** {@link ImageCdn} kept in memory, with preview URLs on a fake CDN host. */
+export class InMemoryImageCdn extends ImageCdn {
+  readonly assets = new Map<string, Buffer>()
+  /** Operations that fail as if Cloudinary was unavailable, until removed. */
+  readonly unavailable = new Set<'upload' | 'delete'>()
+  /** Runs before each upload is stored, e.g. to change the job while the worker is busy. */
+  beforeUpload: ((jobId: string) => Promise<void>) | null = null
+  /** Behaves like a deployment without Cloudinary: nothing is stored and there is no preview URL. */
+  disabled = false
+
+  async upload(jobId: string, data: Buffer): Promise<string | null> {
+    await this.beforeUpload?.(jobId)
+    if (this.disabled) return null
+    if (this.unavailable.has('upload')) throw new Error('Cloudinary is unavailable')
+    this.assets.set(jobId, data)
+    return `https://cdn.test/image/upload/c_limit,f_auto,q_auto,w_800/v1/test/${jobId}`
+  }
+
+  delete(jobId: string): Promise<void> {
+    if (this.unavailable.has('delete')) return Promise.reject(new Error('Cloudinary is unavailable'))
+    this.assets.delete(jobId)
+    return Promise.resolve()
+  }
+
+  /** Forgets all assets and failure settings. */
+  reset(): void {
+    this.assets.clear()
+    this.unavailable.clear()
+    this.beforeUpload = null
+    this.disabled = false
   }
 }

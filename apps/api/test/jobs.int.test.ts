@@ -2,6 +2,8 @@ import type { NestExpressApplication } from '@nestjs/platform-express'
 import {
   createJobResponseSchema,
   type CreateJobResponse,
+  DOWNLOAD_URL_TTL_SECONDS,
+  downloadJobResponseSchema,
   listJobsResponseSchema,
   MAX_INPUT_BYTES,
   submitJobResponseSchema,
@@ -14,19 +16,20 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { createTestApiApp } from './support/app.js'
 import { clearFirestore, signInAnonymously } from './support/emulators.js'
-import type { InMemoryObjectStorage, RecordingTaskQueue } from './support/fakes.js'
+import type { InMemoryImageCdn, InMemoryObjectStorage, RecordingTaskQueue } from './support/fakes.js'
 
 const photo = { originalName: 'photo.jpg', contentType: 'image/jpeg', size: 2048 }
 
 describe('jobs', () => {
   let app: NestExpressApplication
   let storage: InMemoryObjectStorage
+  let cdn: InMemoryImageCdn
   let tasks: RecordingTaskQueue
   let firestore: Firestore
   let user: { token: string; uid: string }
 
   beforeAll(async () => {
-    ;({ app, storage, tasks } = await createTestApiApp())
+    ;({ app, storage, cdn, tasks } = await createTestApiApp())
     firestore = app.get(Firestore)
   })
 
@@ -36,6 +39,8 @@ describe('jobs', () => {
     await clearFirestore()
     storage.objects.clear()
     storage.presigned.clear()
+    storage.unavailable.clear()
+    cdn.reset()
     tasks.enqueued.length = 0
     user = await signInAnonymously()
   })
@@ -53,6 +58,26 @@ describe('jobs', () => {
   const jobsToday = async () => (await firestore.doc(`users/${user.uid}`).get()).get('jobsToday') as number | undefined
   const useWholeQuota = () =>
     firestore.doc(`users/${user.uid}`).set({ dayKey: utcDayKey(new Date()), jobsToday: 5, isAnonymous: true })
+
+  /** Creates a finished job with its original, result and preview in place, as the worker leaves it. */
+  async function finishedJob(fields: Record<string, unknown> = {}): Promise<{ jobId: string; keys: string[] }> {
+    const { jobId } = await createJob()
+    const inputKey = `originals/${user.uid}/${jobId}`
+    const outputKey = `results/${user.uid}/${jobId}.png`
+    storage.upload(inputKey)
+    storage.upload(outputKey, { data: Buffer.from('result'), contentType: 'image/png' })
+    cdn.assets.set(jobId, Buffer.from('result'))
+    await firestore.doc(`jobs/${jobId}`).update({
+      status: 'done',
+      originalName: 'Схема (v2).jpg',
+      inputType: 'image/png',
+      outputKey,
+      outputBytes: 6,
+      previewUrl: `https://cdn.test/${jobId}`,
+      ...fields,
+    })
+    return { jobId, keys: [inputKey, outputKey] }
+  }
 
   describe('POST /jobs', () => {
     it('requires a token', async () => {
@@ -296,6 +321,112 @@ describe('jobs', () => {
       await list('?cursor=garbage').expect(400)
       await list('?limit=0').expect(400)
       await list('?limit=51').expect(400)
+    })
+  })
+
+  describe('GET /jobs/:id/download', () => {
+    const download = (jobId: string, token = user.token) => http().get(`/jobs/${jobId}/download`).set(auth(token))
+
+    it('returns a short-lived URL that saves the result under the original name with the detected type', async () => {
+      const { jobId } = await finishedJob()
+      const before = Date.now()
+
+      const { url, expiresAt } = downloadJobResponseSchema.parse((await download(jobId).expect(200)).body)
+
+      const params = new URL(url).searchParams
+      expect(new URL(url).pathname).toBe(`/results/${user.uid}/${jobId}.png`)
+      expect(params.get('response-content-type')).toBe('image/png')
+      expect(params.get('response-content-disposition')).toBe(
+        `attachment; filename="_____ (v2).png"; filename*=UTF-8''%D0%A1%D1%85%D0%B5%D0%BC%D0%B0%20%28v2%29.png`,
+      )
+      expect(params.get('X-Amz-Expires')).toBe(String(DOWNLOAD_URL_TTL_SECONDS))
+      expect(Date.parse(expiresAt)).toBeGreaterThanOrEqual(before + DOWNLOAD_URL_TTL_SECONDS * 1000)
+    })
+
+    it('returns a URL the browser can display when asked for inline', async () => {
+      const { jobId } = await finishedJob({ originalName: 'logo.png' })
+
+      const { url } = downloadJobResponseSchema.parse(
+        (await http().get(`/jobs/${jobId}/download?disposition=inline`).set(auth()).expect(200)).body,
+      )
+
+      expect(new URL(url).searchParams.get('response-content-disposition')).toBe(
+        `inline; filename="logo.png"; filename*=UTF-8''logo.png`,
+      )
+      await http().get(`/jobs/${jobId}/download?disposition=render`).set(auth()).expect(400)
+    })
+
+    it('refuses jobs that are not finished', async () => {
+      for (const status of ['awaiting_upload', 'queued', 'processing', 'failed']) {
+        const { jobId } = await finishedJob({ status, outputKey: null })
+        await download(jobId).expect(409)
+      }
+    })
+
+    it("hides other users' jobs and unknown ids", async () => {
+      const { jobId } = await finishedJob()
+      const other = await signInAnonymously()
+
+      await download(jobId, other.token).expect(404)
+      await download('a1B2c3D4e5F6g7H8i9J0').expect(404)
+      await download('not-a-job-id').expect(404)
+      await http().get(`/jobs/${jobId}/download`).expect(401)
+    })
+  })
+
+  describe('DELETE /jobs/:id', () => {
+    const remove = (jobId: string, token = user.token) => http().delete(`/jobs/${jobId}`).set(auth(token))
+
+    it('deletes the job, its original, its result and its preview', async () => {
+      const { jobId } = await finishedJob()
+
+      await remove(jobId).expect(204)
+
+      expect(await job(jobId)).toBeUndefined()
+      expect(storage.objects.size).toBe(0)
+      expect(cdn.assets.size).toBe(0)
+      await remove(jobId).expect(404)
+    })
+
+    it('deletes a job that was never uploaded', async () => {
+      const { jobId } = await createJob()
+
+      await remove(jobId).expect(204)
+
+      expect(await job(jobId)).toBeUndefined()
+    })
+
+    it('does not give back quota already used by the job', async () => {
+      const { jobId } = await createJob()
+      storage.upload(`originals/${user.uid}/${jobId}`)
+      await submit(jobId).expect(200)
+
+      await remove(jobId).expect(204)
+
+      expect(await jobsToday()).toBe(1)
+    })
+
+    it('deletes the job even when its files cannot be removed', async () => {
+      const { jobId } = await finishedJob()
+      storage.unavailable.add('delete')
+      cdn.unavailable.add('delete')
+
+      await remove(jobId).expect(204)
+
+      expect(await job(jobId)).toBeUndefined()
+    })
+
+    it("cannot delete other users' jobs", async () => {
+      const { jobId, keys } = await finishedJob()
+      const other = await signInAnonymously()
+
+      await remove(jobId, other.token).expect(404)
+      await remove('not-a-job-id').expect(404)
+      await http().delete(`/jobs/${jobId}`).expect(401)
+
+      expect(await job(jobId)).toMatchObject({ status: 'done' })
+      expect([...storage.objects.keys()].sort()).toEqual(keys.sort())
+      expect(cdn.assets.has(jobId)).toBe(true)
     })
   })
 })

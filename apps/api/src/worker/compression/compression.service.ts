@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common'
 import { type JobStatus, TERMINAL_JOB_STATUSES, utcDayKey } from '@onetodone/image-compressor-shared'
 import { type DocumentSnapshot, FieldValue, Firestore, Timestamp } from 'firebase-admin/firestore'
 
+import { ImageCdn } from '../../common/cloudinary/image-cdn.js'
 import type { WorkerConfig } from '../../common/config/config.js'
 import { CONFIG } from '../../common/config/config.module.js'
 import { CallTimer } from '../../common/logging/call-timer.js'
@@ -35,6 +36,7 @@ export class CompressionService {
   constructor(
     private readonly firestore: Firestore,
     private readonly storage: ObjectStorage,
+    private readonly cdn: ImageCdn,
     private readonly timer: CallTimer,
     @Inject(CONFIG) private readonly config: WorkerConfig,
   ) {}
@@ -87,12 +89,15 @@ export class CompressionService {
     const image = await compressImage(original)
     const outputKey = resultKey(job.ownerId, jobId, image.type)
     await this.storage.put(outputKey, image.data, image.type)
+    const previewUrl = await this.cdn.upload(jobId, image.data)
 
     const ref = this.ref(jobId)
-    return this.timer.measure('firestore', 'jobs.done', () =>
+    const outcome = await this.timer.measure('firestore', 'jobs.done', () =>
       this.firestore.runTransaction(async (tx) => {
+        const snapshot = await tx.get(ref)
+        if (!snapshot.exists) return 'deleted'
         // A concurrent delivery may have finished the job meanwhile; its result stands.
-        if ((await tx.get(ref)).get('status') !== 'processing') return 'skipped'
+        if (snapshot.get('status') !== 'processing') return 'skipped'
         const now = FieldValue.serverTimestamp()
         tx.update(ref, {
           status: 'done',
@@ -102,6 +107,7 @@ export class CompressionService {
           outputBytes: image.data.length,
           width: image.width,
           height: image.height,
+          previewUrl,
           error: null,
           updatedAt: now,
           finishedAt: now,
@@ -109,6 +115,11 @@ export class CompressionService {
         return 'done'
       }),
     )
+    if (outcome !== 'deleted') return outcome
+
+    // The owner deleted the job while it was processing, after its files had been removed.
+    await Promise.all([this.storage.delete(outputKey), this.cdn.delete(jobId)])
+    return 'skipped'
   }
 
   /**

@@ -2,6 +2,7 @@ import { type DynamicModule, Module } from '@nestjs/common'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 
 import { createApp } from '../common/bootstrap.js'
+import { CloudinaryModule } from '../common/cloudinary/cloudinary.module.js'
 import type { WorkerConfig } from '../common/config/config.js'
 import { ConfigModule } from '../common/config/config.module.js'
 import { FirebaseModule } from '../common/firebase/firebase.module.js'
@@ -20,6 +21,7 @@ export class WorkerModule {
         LoggingModule.register(config),
         FirebaseModule,
         R2Module.register(config),
+        CloudinaryModule.register(config),
         HealthModule,
         CompressionModule,
       ],

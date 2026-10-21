@@ -29,14 +29,15 @@ Open http://localhost:3000 and drop an image. The web app reads its `NEXT_PUBLIC
 
 Locally the API uses the Firebase Auth and Firestore emulators (UI on http://127.0.0.1:4000). Every route except `GET /health` requires a Firebase ID token in `Authorization: Bearer <token>`.
 
-Uploads go to a real Cloudflare R2 bucket: fill in the `R2_*` variables in `.env` and apply the bucket's CORS policy as described in [`infra/r2/README.md`](infra/r2/README.md).
+Uploads go to a real Cloudflare R2 bucket: fill in the `R2_*` variables in `.env` and apply the bucket's CORS policy as described in [`infra/r2/README.md`](infra/r2/README.md). Thumbnails can come from Cloudinary: set `CLOUDINARY_URL` to the API environment variable of a key that may upload and delete assets. Without it, the browser loads results from R2.
 
-### Uploading an image
+### Compressing an image
 
 1. `POST /jobs` with `{ "originalName", "contentType", "size" }` returns `jobId` and a presigned `uploadUrl`, valid for 10 minutes.
 2. `PUT` the file to `uploadUrl` with the same `Content-Type`. R2 rejects a body whose type or size differs from the declared one.
 3. `POST /jobs/:id/submit` checks the upload, counts the job against the daily quota and queues it for compression.
 4. The browser follows `jobs/{jobId}` in Firestore until the job is `done` or `failed`. `GET /jobs?limit=&cursor=` lists the user's jobs, newest first.
+5. `GET /jobs/:id/download` returns a presigned URL, valid for 5 minutes, that saves the compressed file under the original name (`?disposition=inline` lets the browser display it instead). `DELETE /jobs/:id` removes the job, its files in R2 and its Cloudinary preview, if any.
 
 ## Scripts
 
@@ -61,7 +62,7 @@ Uploads go to a real Cloudflare R2 bucket: fill in the `R2_*` variables in `.env
 docker compose up --build
 ```
 
-Compose also starts the Firebase Auth and Firestore emulators (ports 9099 and 8080), so the stack runs without a Google Cloud project, and serves the static export of the web app on http://localhost:3000. The API and the worker read the `R2_*` variables from `.env`.
+Compose also starts the Firebase Auth and Firestore emulators (ports 9099 and 8080), so the stack runs without a Google Cloud project, and serves the static export of the web app on http://localhost:3000. The API and the worker read the `R2_*` and `CLOUDINARY_*` variables from `.env`.
 
 ## Repository layout
 
