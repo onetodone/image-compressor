@@ -4,7 +4,7 @@ import { FieldValue, Firestore, type Transaction } from 'firebase-admin/firestor
 
 import { CallTimer } from '../../common/logging/call-timer.js'
 import type { AuthUser } from '../auth/auth-user.js'
-import { consumeQuota, currentQuota, readStoredUsage } from './quota.js'
+import { consumeQuota, currentQuota, readStoredUsage } from '../../common/quota/quota.js'
 
 const USERS = 'users'
 
