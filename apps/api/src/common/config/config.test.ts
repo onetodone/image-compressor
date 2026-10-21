@@ -5,6 +5,12 @@ import { apiConfigSchema, parseConfig, workerConfigSchema } from './config.js'
 const apiEnv = {
   GCP_PROJECT_ID: 'demo-image-compressor',
   CORS_ORIGINS: 'http://localhost:3000, https://example.web.app',
+  R2_ACCOUNT_ID: 'account',
+  R2_ACCESS_KEY_ID: 'key',
+  R2_SECRET_ACCESS_KEY: 'secret',
+  R2_BUCKET: 'bucket',
+  TASKS_MODE: 'direct',
+  WORKER_URL: 'http://localhost:3002',
 }
 
 describe('parseConfig', () => {
@@ -45,6 +51,14 @@ describe('parseConfig', () => {
 
   it('rejects an empty required variable', () => {
     expect(() => parseConfig(apiConfigSchema, { ...apiEnv, GCP_PROJECT_ID: '' })).toThrow(/GCP_PROJECT_ID/)
+  })
+
+  it('requires the R2 credentials for the API', () => {
+    expect(() => parseConfig(apiConfigSchema, { ...apiEnv, R2_SECRET_ACCESS_KEY: '' })).toThrow(/R2_SECRET_ACCESS_KEY/)
+  })
+
+  it('rejects an unknown task delivery mode', () => {
+    expect(() => parseConfig(apiConfigSchema, { ...apiEnv, TASKS_MODE: 'pubsub' })).toThrow(/TASKS_MODE/)
   })
 
   it('rejects an empty CORS origin list', () => {

@@ -2,7 +2,9 @@ import { defaultServerConditions } from 'vite'
 import { defineConfig } from 'vitest/config'
 
 // Workspace packages resolve to their TypeScript sources, so tests never depend on a prior build.
-const conditions = ['@onetodone/source', ...defaultServerConditions]
+// Without the `module` condition, dependencies resolve to the builds Node itself would load: some
+// (e.g. the AWS SDK) publish `module` builds with extensionless imports that Node cannot run.
+const conditions = ['@onetodone/source', ...defaultServerConditions.filter((condition) => condition !== 'module')]
 
 export default defineConfig({
   resolve: { conditions },
