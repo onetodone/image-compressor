@@ -11,11 +11,14 @@ import {
   type CreateJobResponse,
   type JobStatus,
   jobIdSchema,
+  type ListJobsQuery,
+  type ListJobsResponse,
   MAX_INPUT_BYTES,
   type SubmitJobResponse,
+  toJobSummary,
   UPLOAD_URL_TTL_SECONDS,
 } from '@onetodone/image-compressor-shared'
-import { type DocumentReference, FieldValue, Firestore } from 'firebase-admin/firestore'
+import { type DocumentReference, FieldPath, FieldValue, Firestore, type Timestamp } from 'firebase-admin/firestore'
 
 import { CallTimer } from '../../common/logging/call-timer.js'
 import { originalKey } from '../../common/r2/object-keys.js'
@@ -23,6 +26,7 @@ import { ObjectStorage } from '../../common/r2/object-storage.js'
 import { TaskQueue } from '../../common/tasks/task-queue.js'
 import type { AuthUser } from '../auth/auth-user.js'
 import { QuotaService } from '../users/quota.service.js'
+import { decodeJobCursor, encodeJobCursor } from './job-cursor.js'
 
 const JOBS = 'jobs'
 
@@ -36,6 +40,31 @@ export class JobsService {
     private readonly quota: QuotaService,
     private readonly timer: CallTimer,
   ) {}
+
+  /** Returns one page of the user's jobs, newest first. */
+  async list(user: AuthUser, { limit, cursor }: ListJobsQuery): Promise<ListJobsResponse> {
+    let query = this.firestore
+      .collection(JOBS)
+      .where('ownerId', '==', user.uid)
+      .orderBy('createdAt', 'desc')
+      .orderBy(FieldPath.documentId(), 'desc')
+      // One extra document tells whether another page exists.
+      .limit(limit + 1)
+    if (cursor !== undefined) {
+      const position = decodeJobCursor(cursor)
+      if (!position) throw new BadRequestException('Invalid cursor')
+      query = query.startAfter(position.createdAt, position.id)
+    }
+
+    const snapshot = await this.timer.measure('firestore', 'jobs.list', () => query.get())
+    const page = snapshot.docs.slice(0, limit)
+    const last = page.at(-1)
+    const nextCursor =
+      snapshot.docs.length > limit && last
+        ? encodeJobCursor({ createdAt: last.get('createdAt') as Timestamp, id: last.id })
+        : null
+    return { jobs: page.map((doc) => toJobSummary(doc.id, doc.data())), nextCursor }
+  }
 
   async create(user: AuthUser, request: CreateJobRequest): Promise<CreateJobResponse> {
     // Quota is consumed on submit; checking it here only saves an upload that could never be submitted.

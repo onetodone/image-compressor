@@ -1,8 +1,11 @@
-import { Body, Controller, HttpCode, HttpStatus, Param, Post } from '@nestjs/common'
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common'
 import {
   type CreateJobRequest,
   createJobRequestSchema,
   type CreateJobResponse,
+  type ListJobsQuery,
+  listJobsQuerySchema,
+  type ListJobsResponse,
   type SubmitJobResponse,
 } from '@onetodone/image-compressor-shared'
 
@@ -14,6 +17,14 @@ import { JobsService } from './jobs.service.js'
 @Controller('jobs')
 export class JobsController {
   constructor(private readonly jobs: JobsService) {}
+
+  @Get()
+  list(
+    @CurrentUser() user: AuthUser,
+    @Query(new ZodValidationPipe(listJobsQuerySchema)) query: ListJobsQuery,
+  ): Promise<ListJobsResponse> {
+    return this.jobs.list(user, query)
+  }
 
   @Post()
   create(
