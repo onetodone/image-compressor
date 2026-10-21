@@ -29,7 +29,8 @@ pnpm dev
 
 | Script | Description |
 |---|---|
-| `pnpm dev` | Start all apps in development mode |
+| `pnpm dev` | Start all apps in development mode (API on port 3001, worker on 3002) |
+| `pnpm start` | Start the built API and worker |
 | `pnpm emulators` | Start the Firebase Auth and Firestore emulators |
 | `pnpm build` | Build every workspace |
 | `pnpm typecheck` | Type-check every workspace |
@@ -38,6 +39,14 @@ pnpm dev
 | `pnpm test` | Run unit and integration tests |
 | `pnpm test:unit` | Run unit tests only |
 | `pnpm test:integration` | Run integration tests (requires the emulators) |
+
+## Docker
+
+`apps/api/Dockerfile` builds one image for both services. It starts the API by default; the worker runs with `node dist/main.worker.js`.
+
+```bash
+docker compose up --build
+```
 
 ## Repository layout
 

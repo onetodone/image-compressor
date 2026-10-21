@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/.next
+**/out
+**/coverage
+**/*.tsbuildinfo
+**/*.test.ts
+apps/api/test
+.env*
+!.env.example
+.git
