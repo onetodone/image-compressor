@@ -14,6 +14,8 @@ export interface JobHistory {
   error: string | null
   hasMore: boolean
   loadMore: () => void
+  /** Drops a deleted job from the list. */
+  removeJob: (jobId: string) => void
 }
 
 function errorMessage(error: unknown): string {
@@ -26,7 +28,9 @@ function errorMessage(error: unknown): string {
  */
 export function useJobHistory(user: User | null): JobHistory {
   const uid = user?.uid ?? null
-  const [state, setState] = useState<Omit<JobHistory, 'loadMore'> & { uid: string | null; cursor: string | null }>({
+  const [state, setState] = useState<
+    Omit<JobHistory, 'loadMore' | 'removeJob'> & { uid: string | null; cursor: string | null }
+  >({
     uid: null,
     jobs: [],
     status: 'loading',
@@ -80,6 +84,11 @@ export function useJobHistory(user: User | null): JobHistory {
     )
   }, [cursor, status])
 
-  if (state.uid !== uid) return { jobs: [], status: 'loading', error: null, hasMore: false, loadMore }
-  return { jobs: state.jobs, status: state.status, error: state.error, hasMore: state.hasMore, loadMore }
+  const removeJob = useCallback((jobId: string) => {
+    setState((current) => ({ ...current, jobs: current.jobs.filter((job) => job.id !== jobId) }))
+  }, [])
+
+  if (state.uid !== uid) return { jobs: [], status: 'loading', error: null, hasMore: false, loadMore, removeJob }
+  const { jobs, error, hasMore } = state
+  return { jobs, status, error, hasMore, loadMore, removeJob }
 }

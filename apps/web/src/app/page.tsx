@@ -12,7 +12,7 @@ export default function HomePage() {
   const { user, error: authError } = useAuthUser()
   const quota = useQuota(user)
   const history = useJobHistory(user)
-  const { uploads, addFiles } = useUploads()
+  const { uploads, addFiles, removeUpload } = useUploads()
 
   const sessionJobIds = new Set(uploads.map((upload) => upload.jobId))
   const earlierJobs = history.jobs.filter((job) => !sessionJobIds.has(job.id))
@@ -48,7 +48,7 @@ export default function HomePage() {
       {uploads.length > 0 && (
         <section aria-label="Uploads" className="flex flex-col gap-3">
           {uploads.map((upload) => (
-            <UploadCard key={upload.key} upload={upload} />
+            <UploadCard key={upload.key} upload={upload} onRemove={() => removeUpload(upload.key)} />
           ))}
         </section>
       )}
@@ -59,7 +59,7 @@ export default function HomePage() {
             Your images
           </h2>
           {earlierJobs.map((job) => (
-            <HistoryCard key={job.id} initial={job} />
+            <HistoryCard key={job.id} initial={job} onDeleted={() => history.removeJob(job.id)} />
           ))}
           {history.status === 'idle' && earlierJobs.length === 0 && uploads.length === 0 && (
             <p className="text-sm text-zinc-500 dark:text-zinc-400">Images you compress show up here.</p>
