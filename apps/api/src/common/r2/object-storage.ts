@@ -35,4 +35,10 @@ export abstract class ObjectStorage {
 
   /** Returns the size and type of an object, or `null` if it does not exist. */
   abstract head(key: string): Promise<StoredObject | null>
+
+  /** Downloads the content of an object, or returns `null` if it does not exist. */
+  abstract get(key: string): Promise<Buffer | null>
+
+  /** Stores `body` under `key`, replacing any existing object. */
+  abstract put(key: string, body: Buffer, contentType: string): Promise<void>
 }

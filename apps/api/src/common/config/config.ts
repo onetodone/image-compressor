@@ -37,7 +37,11 @@ export const apiConfigSchema = baseConfigSchema.extend({
 })
 
 /** Environment variables required by the private worker service. */
-export const workerConfigSchema = baseConfigSchema
+export const workerConfigSchema = baseConfigSchema.extend({
+  ...r2ConfigSchema.shape,
+  // Must match the queue's max attempts, so the last delivery can fail the job instead of retrying.
+  TASKS_MAX_ATTEMPTS: z.coerce.number().int().min(1),
+})
 
 /** Settings shared by the API and the worker. */
 export type BaseConfig = z.infer<typeof baseConfigSchema>

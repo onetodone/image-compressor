@@ -1,7 +1,8 @@
+import { jobIdSchema } from '@onetodone/image-compressor-shared'
 import { z } from 'zod'
 
 /** Validates the body of a compression task sent to the worker. */
-export const compressTaskSchema = z.object({ jobId: z.string().min(1) })
+export const compressTaskSchema = z.object({ jobId: jobIdSchema })
 
 /** Body of a compression task sent to the worker. */
 export type CompressTask = z.infer<typeof compressTaskSchema>

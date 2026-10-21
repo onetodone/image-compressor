@@ -1,0 +1,157 @@
+import { Inject, Injectable, Logger } from '@nestjs/common'
+import { type JobStatus, TERMINAL_JOB_STATUSES, utcDayKey } from '@onetodone/image-compressor-shared'
+import { type DocumentSnapshot, FieldValue, Firestore, Timestamp } from 'firebase-admin/firestore'
+
+import type { WorkerConfig } from '../../common/config/config.js'
+import { CONFIG } from '../../common/config/config.module.js'
+import { CallTimer } from '../../common/logging/call-timer.js'
+import { readStoredUsage, refundQuota } from '../../common/quota/quota.js'
+import { resultKey } from '../../common/r2/object-keys.js'
+import { ObjectStorage } from '../../common/r2/object-storage.js'
+import { compressImage } from './compress-image.js'
+import { PermanentJobError } from './permanent-job-error.js'
+
+const JOBS = 'jobs'
+const USERS = 'users'
+
+const RETRIES_EXHAUSTED = 'The image could not be processed. Please try again later.'
+
+/**
+ * Result of one task delivery: the job was finished (`done`, `failed`), or there was nothing to do
+ * because the job does not exist or is already finished (`skipped`).
+ */
+export type TaskOutcome = 'done' | 'failed' | 'skipped'
+
+interface ClaimedJob {
+  ownerId: string
+  inputKey: string
+}
+
+/** Compresses queued jobs. Safe to run more than once for the same job, as Cloud Tasks may deliver a task twice. */
+@Injectable()
+export class CompressionService {
+  private readonly logger = new Logger(CompressionService.name)
+
+  constructor(
+    private readonly firestore: Firestore,
+    private readonly storage: ObjectStorage,
+    private readonly timer: CallTimer,
+    @Inject(CONFIG) private readonly config: WorkerConfig,
+  ) {}
+
+  /**
+   * Processes one delivery of a compression task.
+   *
+   * @param attempt 1-based delivery attempt; the last one fails the job instead of asking for a retry
+   * @throws Error on a transient failure, so the task is delivered again
+   */
+  async process(jobId: string, attempt: number): Promise<TaskOutcome> {
+    const job = await this.claim(jobId)
+    if (!job) return 'skipped'
+
+    try {
+      return await this.compress(jobId, job)
+    } catch (error) {
+      if (error instanceof PermanentJobError) return this.fail(jobId, error.message)
+      if (attempt < this.config.TASKS_MAX_ATTEMPTS) throw error
+      this.logger.error({ jobId, attempt, err: error }, 'Compression failed on the last attempt')
+      return this.fail(jobId, RETRIES_EXHAUSTED)
+    }
+  }
+
+  /**
+   * Moves a queued job to `processing`. A job already in `processing` is taken over, because the
+   * attempt that set it may have crashed. Returns `null` when there is nothing to process.
+   */
+  private claim(jobId: string): Promise<ClaimedJob | null> {
+    const ref = this.ref(jobId)
+    return this.timer.measure('firestore', 'jobs.claim', () =>
+      this.firestore.runTransaction(async (tx) => {
+        const snapshot = await tx.get(ref)
+        const status = snapshot.get('status') as JobStatus | undefined
+        if (status !== 'queued' && status !== 'processing') return null
+        tx.update(ref, {
+          status: 'processing',
+          attempts: FieldValue.increment(1),
+          updatedAt: FieldValue.serverTimestamp(),
+        })
+        return { ownerId: snapshot.get('ownerId') as string, inputKey: snapshot.get('inputKey') as string }
+      }),
+    )
+  }
+
+  private async compress(jobId: string, job: ClaimedJob): Promise<TaskOutcome> {
+    const original = await this.storage.get(job.inputKey)
+    if (!original) throw new PermanentJobError('The uploaded file is no longer available')
+
+    const image = await compressImage(original)
+    const outputKey = resultKey(job.ownerId, jobId, image.type)
+    await this.storage.put(outputKey, image.data, image.type)
+
+    const ref = this.ref(jobId)
+    return this.timer.measure('firestore', 'jobs.done', () =>
+      this.firestore.runTransaction(async (tx) => {
+        // A concurrent delivery may have finished the job meanwhile; its result stands.
+        if ((await tx.get(ref)).get('status') !== 'processing') return 'skipped'
+        const now = FieldValue.serverTimestamp()
+        tx.update(ref, {
+          status: 'done',
+          inputType: image.type,
+          inputBytes: original.length,
+          outputKey,
+          outputBytes: image.data.length,
+          width: image.width,
+          height: image.height,
+          error: null,
+          updatedAt: now,
+          finishedAt: now,
+        })
+        return 'done'
+      }),
+    )
+  }
+
+  /**
+   * Marks the job `failed` and gives its quota unit back. `quotaRefunded` and the terminal status
+   * guard the refund, so repeated deliveries never refund twice.
+   */
+  private fail(jobId: string, message: string): Promise<TaskOutcome> {
+    const ref = this.ref(jobId)
+    return this.timer.measure('firestore', 'jobs.fail', () =>
+      this.firestore.runTransaction(async (tx) => {
+        const snapshot = await tx.get(ref)
+        if (!snapshot.exists || TERMINAL_JOB_STATUSES.includes(snapshot.get('status') as JobStatus)) return 'skipped'
+
+        let quotaRefunded = snapshot.get('quotaRefunded') === true
+        const dayKey = quotaDayKey(snapshot)
+        if (!quotaRefunded && dayKey) {
+          const userRef = this.firestore.collection(USERS).doc(snapshot.get('ownerId') as string)
+          const refunded = refundQuota(readStoredUsage((await tx.get(userRef)).data()), dayKey)
+          if (refunded) {
+            tx.update(userRef, { jobsToday: refunded.jobsToday })
+            quotaRefunded = true
+          }
+        }
+
+        const now = FieldValue.serverTimestamp()
+        tx.update(ref, { status: 'failed', error: message, quotaRefunded, updatedAt: now, finishedAt: now })
+        return 'failed'
+      }),
+    )
+  }
+
+  private ref(jobId: string) {
+    return this.firestore.collection(JOBS).doc(jobId)
+  }
+}
+
+/**
+ * UTC day the job's quota unit was counted on. Jobs submitted before `quotaDayKey` was stored fall
+ * back to their creation day.
+ */
+function quotaDayKey(job: DocumentSnapshot): string | null {
+  const dayKey: unknown = job.get('quotaDayKey')
+  if (typeof dayKey === 'string') return dayKey
+  const createdAt: unknown = job.get('createdAt')
+  return createdAt instanceof Timestamp ? utcDayKey(createdAt.toDate()) : null
+}

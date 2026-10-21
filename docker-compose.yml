@@ -56,6 +56,11 @@ services:
     environment:
       NODE_ENV: production
       PORT: 8080
-      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-demo-image-compressor}
+      GCP_PROJECT_ID: demo-image-compressor
+      FIRESTORE_EMULATOR_HOST: emulators:8080
+      METADATA_SERVER_DETECTION: none
+      TASKS_MAX_ATTEMPTS: ${TASKS_MAX_ATTEMPTS:-5}
+    depends_on:
+      - emulators
     ports:
       - '3002:8080'

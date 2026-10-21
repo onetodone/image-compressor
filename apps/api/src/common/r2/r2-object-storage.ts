@@ -1,4 +1,11 @@
-import { HeadObjectCommand, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3'
+import {
+  GetObjectCommand,
+  HeadObjectCommand,
+  NoSuchKey,
+  PutObjectCommand,
+  S3Client,
+  S3ServiceException,
+} from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 import type { R2Config } from '../config/config.js'
@@ -53,5 +60,24 @@ export class R2ObjectStorage extends ObjectStorage {
       if (error instanceof S3ServiceException && error.$metadata.httpStatusCode === 404) return null
       throw error
     }
+  }
+
+  async get(key: string): Promise<Buffer | null> {
+    try {
+      return await this.timer.measure('r2', 'getObject', async () => {
+        const output = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }))
+        if (!output.Body) throw new Error(`R2 returned no body for ${key}`)
+        return Buffer.from(await output.Body.transformToByteArray())
+      })
+    } catch (error) {
+      if (error instanceof NoSuchKey) return null
+      throw error
+    }
+  }
+
+  async put(key: string, body: Buffer, contentType: string): Promise<void> {
+    await this.timer.measure('r2', 'putObject', () =>
+      this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType })),
+    )
   }
 }

@@ -67,6 +67,7 @@ export class JobsService {
         previewUrl: null,
         error: null,
         attempts: 0,
+        quotaDayKey: null,
         quotaRefunded: false,
         createdAt: now,
         updatedAt: now,
@@ -96,8 +97,13 @@ export class JobsService {
         this.firestore.runTransaction(async (tx) => {
           const current = (await tx.get(ref)).get('status') as JobStatus
           if (current !== 'awaiting_upload') return current
-          await this.quota.consume(tx, user)
-          tx.update(ref, { status: 'queued', inputBytes, updatedAt: FieldValue.serverTimestamp() })
+          const { dayKey } = await this.quota.consume(tx, user)
+          tx.update(ref, {
+            status: 'queued',
+            inputBytes,
+            quotaDayKey: dayKey,
+            updatedAt: FieldValue.serverTimestamp(),
+          })
           return 'queued'
         }),
       )

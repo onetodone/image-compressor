@@ -5,7 +5,8 @@ import { ApiModule, configureApiApp } from '../../src/api/api.module.js'
 import { configureApp } from '../../src/common/bootstrap.js'
 import { ObjectStorage } from '../../src/common/r2/object-storage.js'
 import { TaskQueue } from '../../src/common/tasks/task-queue.js'
-import { apiConfig } from './config.js'
+import { WorkerModule } from '../../src/worker/worker.module.js'
+import { apiConfig, workerConfig } from './config.js'
 import { InMemoryObjectStorage, RecordingTaskQueue } from './fakes.js'
 
 /** An initialized API application whose R2 storage and task queue are in-memory fakes. */
@@ -29,4 +30,23 @@ export async function createTestApiApp(): Promise<TestApiApp> {
   configureApiApp(configureApp(app), apiConfig)
   await app.init()
   return { app, storage, tasks }
+}
+
+/** An initialized worker application whose R2 storage is an in-memory fake. */
+export interface TestWorkerApp {
+  app: NestExpressApplication
+  storage: InMemoryObjectStorage
+}
+
+/** Creates the worker against the emulators with an in-memory replacement for R2. */
+export async function createTestWorkerApp(): Promise<TestWorkerApp> {
+  const storage = new InMemoryObjectStorage()
+  const moduleRef = await Test.createTestingModule({ imports: [WorkerModule.register(workerConfig)] })
+    .overrideProvider(ObjectStorage)
+    .useValue(storage)
+    .compile()
+  const app = moduleRef.createNestApplication<NestExpressApplication>({ bufferLogs: true })
+  configureApp(app)
+  await app.init()
+  return { app, storage }
 }

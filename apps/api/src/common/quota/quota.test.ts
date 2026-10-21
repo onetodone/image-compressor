@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { consumeQuota, currentQuota, readStoredUsage } from './quota.js'
+import { consumeQuota, currentQuota, readStoredUsage, refundQuota } from './quota.js'
 
 const now = new Date('2026-10-22T08:00:00Z')
 
@@ -66,5 +66,23 @@ describe('readStoredUsage', () => {
   it('treats a missing document or missing fields as no usage', () => {
     expect(readStoredUsage(undefined)).toBeUndefined()
     expect(readStoredUsage({ isAnonymous: true })).toBeUndefined()
+  })
+})
+
+describe('refundQuota', () => {
+  it('gives back one job on the day it was counted', () => {
+    expect(refundQuota({ dayKey: '2026-10-22', jobsToday: 3 }, '2026-10-22')).toEqual({
+      dayKey: '2026-10-22',
+      jobsToday: 2,
+    })
+  })
+
+  it('gives nothing back once the counter belongs to another day', () => {
+    expect(refundQuota({ dayKey: '2026-10-23', jobsToday: 1 }, '2026-10-22')).toBeNull()
+  })
+
+  it('never makes the counter negative', () => {
+    expect(refundQuota({ dayKey: '2026-10-22', jobsToday: 0 }, '2026-10-22')).toBeNull()
+    expect(refundQuota(undefined, '2026-10-22')).toBeNull()
   })
 })
