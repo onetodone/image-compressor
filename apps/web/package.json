@@ -1,0 +1,17 @@
+{
+  "name": "@onetodone/image-compressor-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "eslint-config-next": "16.4.2",
+    "prettier": "catalog:",
+    "prettier-plugin-tailwindcss": "^0.8.1",
+    "typescript": "catalog:"
+  },
+  "dependencies": {
+    "next": "16.4.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  }
+}
