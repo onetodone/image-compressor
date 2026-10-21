@@ -4,19 +4,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { createApiApp } from '../src/api/api.module.js'
 import { createWorkerApp } from '../src/worker/worker.module.js'
-
-const base = {
-  NODE_ENV: 'test',
-  PORT: 0,
-  GCP_PROJECT_ID: 'demo-image-compressor',
-  SLOW_CALL_THRESHOLD_MS: 1000,
-} as const
+import { apiConfig, workerConfig } from './support/config.js'
 
 describe('API service', () => {
   let app: NestExpressApplication
 
   beforeAll(async () => {
-    app = await createApiApp({ ...base, CORS_ORIGINS: ['http://localhost:3000'] })
+    app = await createApiApp(apiConfig)
     await app.init()
   })
 
@@ -45,7 +39,7 @@ describe('worker service', () => {
   let app: NestExpressApplication
 
   beforeAll(async () => {
-    app = await createWorkerApp(base)
+    app = await createWorkerApp(workerConfig)
     await app.init()
   })
 

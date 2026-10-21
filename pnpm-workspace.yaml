@@ -10,4 +10,7 @@ catalog:
   zod: ^4.6.7
 
 allowBuilds:
+  '@firebase/util': false
+  protobufjs: false
+  re2: false
   unrs-resolver: false

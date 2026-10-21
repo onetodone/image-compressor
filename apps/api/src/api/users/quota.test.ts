@@ -1,0 +1,70 @@
+import { describe, expect, it } from 'vitest'
+
+import { consumeQuota, currentQuota, readStoredUsage } from './quota.js'
+
+const now = new Date('2026-10-22T08:00:00Z')
+
+describe('currentQuota', () => {
+  it('reports the stored count on the same UTC day', () => {
+    expect(currentQuota({ dayKey: '2026-10-22', jobsToday: 2 }, true, now)).toEqual({
+      dayKey: '2026-10-22',
+      used: 2,
+      limit: 5,
+    })
+  })
+
+  it('starts from zero after the UTC day changes', () => {
+    expect(currentQuota({ dayKey: '2026-10-21', jobsToday: 5 }, true, now).used).toBe(0)
+  })
+
+  it('rolls over at UTC midnight, not local midnight', () => {
+    const stored = { dayKey: '2026-10-21', jobsToday: 3 }
+
+    expect(currentQuota(stored, true, new Date('2026-10-21T23:59:59.999Z')).used).toBe(3)
+    expect(currentQuota(stored, true, new Date('2026-10-22T00:00:00.000Z')).used).toBe(0)
+  })
+
+  it('uses the signed-in limit for non-anonymous users', () => {
+    expect(currentQuota(undefined, false, now)).toEqual({ dayKey: '2026-10-22', used: 0, limit: 30 })
+  })
+})
+
+describe('consumeQuota', () => {
+  it('counts the first job of a new user', () => {
+    expect(consumeQuota(undefined, true, now)).toEqual({ dayKey: '2026-10-22', used: 1, limit: 5 })
+  })
+
+  it('increments the count on the same day', () => {
+    expect(consumeQuota({ dayKey: '2026-10-22', jobsToday: 4 }, true, now)?.used).toBe(5)
+  })
+
+  it('refuses a job once the daily limit is reached', () => {
+    expect(consumeQuota({ dayKey: '2026-10-22', jobsToday: 5 }, true, now)).toBeNull()
+  })
+
+  it('allows jobs again on the next UTC day after reaching the limit', () => {
+    expect(consumeQuota({ dayKey: '2026-10-21', jobsToday: 5 }, true, now)).toEqual({
+      dayKey: '2026-10-22',
+      used: 1,
+      limit: 5,
+    })
+  })
+
+  it('applies the higher limit after upgrading from an anonymous account', () => {
+    expect(consumeQuota({ dayKey: '2026-10-22', jobsToday: 5 }, false, now)?.used).toBe(6)
+  })
+})
+
+describe('readStoredUsage', () => {
+  it('reads the day key and counter', () => {
+    expect(readStoredUsage({ dayKey: '2026-10-22', jobsToday: 1, isAnonymous: true })).toEqual({
+      dayKey: '2026-10-22',
+      jobsToday: 1,
+    })
+  })
+
+  it('treats a missing document or missing fields as no usage', () => {
+    expect(readStoredUsage(undefined)).toBeUndefined()
+    expect(readStoredUsage({ isAnonymous: true })).toBeUndefined()
+  })
+})
