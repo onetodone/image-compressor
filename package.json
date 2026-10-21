@@ -1,6 +1,6 @@
 {
   "name": "@onetodone/image-compressor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Image compression service: upload JPEG or PNG images and download smaller versions.",
   "private": true,
   "type": "module",
@@ -35,15 +35,16 @@
     "lint": "eslint . --fix",
     "lint:check": "eslint .",
     "typecheck": "tsc -p tsconfig.json && pnpm -r --if-present run typecheck",
-    "test": "vitest run",
+    "test": "pnpm test:unit && pnpm test:integration",
     "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration"
+    "test:integration": "firebase emulators:exec --config infra/firebase.test.json --project demo-image-compressor-test --only auth,firestore 'vitest run --project integration'"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@types/node": "catalog:",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.1.8",
+    "firebase-tools": "^15.34.0",
     "globals": "^17.13.0",
     "prettier": "catalog:",
     "typescript": "catalog:",

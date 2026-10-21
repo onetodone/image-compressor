@@ -14,16 +14,18 @@ Upload JPEG or PNG images and download smaller versions. A background worker com
 
 - Node.js 24
 - pnpm 12 (version pinned in `package.json`)
-- Java 21 for the Firebase emulators
-- Firebase CLI
+- Java 21 for the Firebase emulators (the Firebase CLI is a dev dependency)
 
 ## Getting started
 
 ```bash
 pnpm install
 cp .env.example .env
+pnpm emulators   # in a separate terminal
 pnpm dev
 ```
+
+Locally the API uses the Firebase Auth and Firestore emulators (UI on http://127.0.0.1:4000). Every route except `GET /health` requires a Firebase ID token in `Authorization: Bearer <token>`.
 
 ## Scripts
 
@@ -31,14 +33,14 @@ pnpm dev
 |---|---|
 | `pnpm dev` | Start all apps in development mode (API on port 3001, worker on 3002) |
 | `pnpm start` | Start the built API and worker |
-| `pnpm emulators` | Start the Firebase Auth and Firestore emulators |
+| `pnpm emulators` | Start the Firebase Auth (9099) and Firestore (8080) emulators |
 | `pnpm build` | Build every workspace |
 | `pnpm typecheck` | Type-check every workspace |
 | `pnpm lint` / `pnpm lint:check` | Lint and fix / lint only |
 | `pnpm format` / `pnpm format:check` | Format / check formatting |
 | `pnpm test` | Run unit and integration tests |
 | `pnpm test:unit` | Run unit tests only |
-| `pnpm test:integration` | Run integration tests (requires the emulators) |
+| `pnpm test:integration` | Run integration tests against their own emulator instance (ports 9199 and 8180) |
 
 ## Docker
 
@@ -47,6 +49,8 @@ pnpm dev
 ```bash
 docker compose up --build
 ```
+
+Compose also starts the Firebase Auth and Firestore emulators (ports 9099 and 8080), so the stack runs without a Google Cloud project.
 
 ## Repository layout
 

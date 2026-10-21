@@ -23,6 +23,9 @@ export default defineConfig({
         test: {
           name: 'integration',
           include: ['{apps,packages}/*/{src,test}/**/*.int.test.ts'],
+          // Files share one set of emulators and clear their data between tests.
+          fileParallelism: false,
+          env: { METADATA_SERVER_DETECTION: 'none' },
         },
       },
     ],
