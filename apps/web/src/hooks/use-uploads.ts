@@ -21,10 +21,12 @@ export interface Upload {
   error: string | null
 }
 
-/** Uploads picked in this session, newest first, and a function that starts more. */
+/** Uploads picked in this session, newest first, and functions that start more or drop one. */
 export interface Uploads {
   uploads: Upload[]
   addFiles: (files: Iterable<File>) => void
+  /** Drops an upload from the list and releases its object URL. */
+  removeUpload: (key: string) => void
 }
 
 /** Runs the upload flow for each picked file: create the job, upload to R2, submit. */
@@ -83,5 +85,16 @@ export function useUploads(): Uploads {
     [run],
   )
 
-  return { uploads, addFiles }
+  const removeUpload = useCallback((key: string) => {
+    setUploads((current) => {
+      const objectUrl = current.find((upload) => upload.key === key)?.objectUrl
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl)
+        objectUrls.current.delete(objectUrl)
+      }
+      return current.filter((upload) => upload.key !== key)
+    })
+  }, [])
+
+  return { uploads, addFiles, removeUpload }
 }

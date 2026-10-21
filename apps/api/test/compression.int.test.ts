@@ -8,7 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createTestWorkerApp } from './support/app.js'
 import { workerConfig } from './support/config.js'
 import { clearFirestore } from './support/emulators.js'
-import type { InMemoryObjectStorage } from './support/fakes.js'
+import type { InMemoryImageCdn, InMemoryObjectStorage } from './support/fakes.js'
 import { fixture } from './support/fixtures.js'
 
 const UID = 'user-1'
@@ -19,11 +19,12 @@ const LAST_RETRY = String(workerConfig.TASKS_MAX_ATTEMPTS - 1)
 describe('POST /tasks/compress', () => {
   let app: NestExpressApplication
   let storage: InMemoryObjectStorage
+  let cdn: InMemoryImageCdn
   let firestore: Firestore
   const today = utcDayKey(new Date())
 
   beforeAll(async () => {
-    ;({ app, storage } = await createTestWorkerApp())
+    ;({ app, storage, cdn } = await createTestWorkerApp())
     firestore = app.get(Firestore)
   })
 
@@ -33,6 +34,7 @@ describe('POST /tasks/compress', () => {
     await clearFirestore()
     storage.objects.clear()
     storage.unavailable.clear()
+    cdn.reset()
   })
 
   const deliver = (body: object = { jobId: JOB_ID }, retryCount?: string) => {
@@ -87,10 +89,12 @@ describe('POST /tasks/compress', () => {
       outputBytes: result!.size,
       width: 160,
       height: 120,
+      previewUrl: `https://cdn.test/image/upload/c_limit,f_auto,q_auto,w_800/v1/test/${JOB_ID}`,
       error: null,
       attempts: 1,
       finishedAt: expect.any(Timestamp),
     })
+    expect(cdn.assets.get(JOB_ID)).toEqual(result!.data)
     expect(await jobsToday()).toBe(2)
   })
 
@@ -201,6 +205,43 @@ describe('POST /tasks/compress', () => {
 
     storage.unavailable.clear()
     await deliver({ jobId: JOB_ID }, '1').expect(200, { jobId: JOB_ID, outcome: 'done' })
+  })
+
+  it('finishes without a preview when no CDN is configured', async () => {
+    await queueJob(fixture('photo.jpg'))
+    cdn.disabled = true
+
+    await deliver().expect(200, { jobId: JOB_ID, outcome: 'done' })
+
+    expect(await job()).toMatchObject({ status: 'done', previewUrl: null, outputKey: `results/${UID}/${JOB_ID}.jpg` })
+    expect(cdn.assets.size).toBe(0)
+  })
+
+  it('asks for a retry when the CDN is unavailable and finishes on the next delivery', async () => {
+    await queueJob(fixture('photo.jpg'))
+    cdn.unavailable.add('upload')
+
+    await deliver().expect(503)
+
+    expect(await job()).toMatchObject({ status: 'processing', previewUrl: null })
+
+    cdn.unavailable.clear()
+    await deliver({ jobId: JOB_ID }, '1').expect(200, { jobId: JOB_ID, outcome: 'done' })
+    expect(await job()).toMatchObject({ status: 'done', previewUrl: expect.stringContaining(JOB_ID) })
+    expect(cdn.assets.size).toBe(1)
+  })
+
+  it('removes its own result when the job is deleted while it is being compressed', async () => {
+    await queueJob(fixture('photo.jpg'))
+    cdn.beforeUpload = async () => {
+      await firestore.doc(`jobs/${JOB_ID}`).delete()
+    }
+
+    await deliver().expect(200, { jobId: JOB_ID, outcome: 'skipped' })
+
+    expect(await job()).toBeUndefined()
+    expect(storage.objects.has(`results/${UID}/${JOB_ID}.jpg`)).toBe(false)
+    expect(cdn.assets.size).toBe(0)
   })
 
   it('fails the job and refunds the quota when the last attempt hits a transient error', async () => {

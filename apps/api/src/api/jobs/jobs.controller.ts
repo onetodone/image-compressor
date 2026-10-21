@@ -1,8 +1,11 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common'
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common'
 import {
   type CreateJobRequest,
   createJobRequestSchema,
   type CreateJobResponse,
+  type DownloadJobQuery,
+  downloadJobQuerySchema,
+  type DownloadJobResponse,
   type ListJobsQuery,
   listJobsQuerySchema,
   type ListJobsResponse,
@@ -38,5 +41,20 @@ export class JobsController {
   @HttpCode(HttpStatus.OK)
   submit(@CurrentUser() user: AuthUser, @Param('id') id: string): Promise<SubmitJobResponse> {
     return this.jobs.submit(user, id)
+  }
+
+  @Get(':id/download')
+  download(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Query(new ZodValidationPipe(downloadJobQuerySchema)) query: DownloadJobQuery,
+  ): Promise<DownloadJobResponse> {
+    return this.jobs.download(user, id, query)
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  delete(@CurrentUser() user: AuthUser, @Param('id') id: string): Promise<void> {
+    return this.jobs.delete(user, id)
   }
 }

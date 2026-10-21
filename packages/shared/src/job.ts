@@ -27,6 +27,9 @@ export const MAX_INPUT_BYTES = 10 * 1024 * 1024
 /** How long a presigned upload URL stays valid, in seconds (10 minutes). */
 export const UPLOAD_URL_TTL_SECONDS = 10 * 60
 
+/** How long a presigned download URL stays valid, in seconds (5 minutes). */
+export const DOWNLOAD_URL_TTL_SECONDS = 5 * 60
+
 /** Validates a job id: a Firestore auto-generated document id. */
 export const jobIdSchema = z.string().regex(/^[A-Za-z0-9]{20}$/)
 
@@ -72,6 +75,26 @@ export const submitJobResponseSchema = z.object({
 
 /** Response of `POST /jobs/:id/submit`: the job and its status after the submit. */
 export type SubmitJobResponse = z.infer<typeof submitJobResponseSchema>
+
+/** Validates the query of `GET /jobs/:id/download`. */
+export const downloadJobQuerySchema = z.object({
+  /** `attachment` saves the file; `inline` lets the browser display it, e.g. in an `<img>`. */
+  disposition: z.enum(['attachment', 'inline']).default('attachment'),
+})
+
+/** Query of `GET /jobs/:id/download`. */
+export type DownloadJobQuery = z.infer<typeof downloadJobQuerySchema>
+
+/** Validates the response of `GET /jobs/:id/download`. */
+export const downloadJobResponseSchema = z.object({
+  /** Presigned URL of the compressed file, named after the original. */
+  url: z.url(),
+  /** ISO timestamp after which `url` no longer works. */
+  expiresAt: z.iso.datetime(),
+})
+
+/** Response of `GET /jobs/:id/download`. */
+export type DownloadJobResponse = z.infer<typeof downloadJobResponseSchema>
 
 /** Validates a job as shown to its owner. Storage keys and internal bookkeeping are left out. */
 export const jobSummarySchema = z.object({

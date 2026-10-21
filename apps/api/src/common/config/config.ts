@@ -16,6 +16,24 @@ const r2ConfigSchema = z.object({
   R2_BUCKET: required,
 })
 
+/** An optional variable; an empty value counts as unset. */
+function optional<S extends z.ZodType>(schema: S) {
+  return z.preprocess((value) => (value === '' ? undefined : value), schema.optional())
+}
+
+const cloudinaryConfigSchema = z.object({
+  // Without it, previews are not created and the browser shows results straight from R2.
+  CLOUDINARY_URL: optional(
+    z
+      .string()
+      .regex(
+        /^cloudinary:\/\/[^:@/]+:[^@/]+@[^@/]+$/,
+        'Must look like cloudinary://<api_key>:<api_secret>@<cloud_name>',
+      ),
+  ),
+  CLOUDINARY_FOLDER: required.default('image-compressor'),
+})
+
 const tasksConfigSchema = z.object({
   TASKS_MODE: z.enum(['direct']),
   WORKER_URL: z.url(),
@@ -24,6 +42,7 @@ const tasksConfigSchema = z.object({
 /** Environment variables required by the public API service. */
 export const apiConfigSchema = baseConfigSchema.extend({
   ...r2ConfigSchema.shape,
+  ...cloudinaryConfigSchema.shape,
   ...tasksConfigSchema.shape,
   CORS_ORIGINS: z
     .string()
@@ -39,6 +58,7 @@ export const apiConfigSchema = baseConfigSchema.extend({
 /** Environment variables required by the private worker service. */
 export const workerConfigSchema = baseConfigSchema.extend({
   ...r2ConfigSchema.shape,
+  ...cloudinaryConfigSchema.shape,
   // Must match the queue's max attempts, so the last delivery can fail the job instead of retrying.
   TASKS_MAX_ATTEMPTS: z.coerce.number().int().min(1),
 })
@@ -47,6 +67,8 @@ export const workerConfigSchema = baseConfigSchema.extend({
 export type BaseConfig = z.infer<typeof baseConfigSchema>
 /** Cloudflare R2 credentials and bucket. */
 export type R2Config = z.infer<typeof r2ConfigSchema>
+/** Cloudinary credentials, if previews are enabled, and the folder previews are stored in. */
+export type CloudinaryConfig = z.infer<typeof cloudinaryConfigSchema>
 /** How compression tasks are delivered to the worker. */
 export type TasksConfig = z.infer<typeof tasksConfigSchema>
 /** Validated configuration of the API service. */

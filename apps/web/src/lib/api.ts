@@ -2,12 +2,15 @@ import {
   type CreateJobRequest,
   type CreateJobResponse,
   createJobResponseSchema,
+  type DownloadJobQuery,
+  type DownloadJobResponse,
+  downloadJobResponseSchema,
   type ListJobsResponse,
   listJobsResponseSchema,
   type SubmitJobResponse,
   submitJobResponseSchema,
 } from '@onetodone/image-compressor-shared'
-import type { z } from 'zod'
+import { z } from 'zod'
 
 import { ApiError, apiErrorMessage } from './api-error'
 import { env } from './env'
@@ -50,5 +53,21 @@ export const api = {
   listJobs(cursor: string | null): Promise<ListJobsResponse> {
     const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
     return request(`/jobs${query}`, listJobsResponseSchema)
+  },
+
+  /**
+   * Returns a short-lived URL of the compressed file of a finished job.
+   * @param disposition `attachment` saves the file, `inline` lets an `<img>` display it
+   */
+  downloadJob(
+    jobId: string,
+    disposition: DownloadJobQuery['disposition'] = 'attachment',
+  ): Promise<DownloadJobResponse> {
+    return request(`/jobs/${encodeURIComponent(jobId)}/download?disposition=${disposition}`, downloadJobResponseSchema)
+  },
+
+  /** Deletes a job together with its files. */
+  async deleteJob(jobId: string): Promise<void> {
+    await request(`/jobs/${encodeURIComponent(jobId)}`, z.undefined(), { method: 'DELETE' })
   },
 }

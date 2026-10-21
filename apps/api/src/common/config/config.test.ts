@@ -9,6 +9,8 @@ const apiEnv = {
   R2_ACCESS_KEY_ID: 'key',
   R2_SECRET_ACCESS_KEY: 'secret',
   R2_BUCKET: 'bucket',
+  CLOUDINARY_URL: 'cloudinary://123:secret@cloud',
+  CLOUDINARY_FOLDER: 'image-compressor-test',
   TASKS_MODE: 'direct',
   WORKER_URL: 'http://localhost:3002',
 }
@@ -19,6 +21,8 @@ const workerEnv = {
   R2_ACCESS_KEY_ID: 'key',
   R2_SECRET_ACCESS_KEY: 'secret',
   R2_BUCKET: 'bucket',
+  CLOUDINARY_URL: 'cloudinary://123:secret@cloud',
+  CLOUDINARY_FOLDER: 'image-compressor-test',
   TASKS_MAX_ATTEMPTS: '5',
 }
 
@@ -68,6 +72,22 @@ describe('parseConfig', () => {
 
   it('requires the R2 credentials for the API', () => {
     expect(() => parseConfig(apiConfigSchema, { ...apiEnv, R2_SECRET_ACCESS_KEY: '' })).toThrow(/R2_SECRET_ACCESS_KEY/)
+  })
+
+  it('treats Cloudinary as optional and an empty URL as unset', () => {
+    for (const value of [undefined, '']) {
+      const config = parseConfig(apiConfigSchema, { ...apiEnv, CLOUDINARY_URL: value, CLOUDINARY_FOLDER: undefined })
+      expect(config.CLOUDINARY_URL).toBeUndefined()
+      expect(config.CLOUDINARY_FOLDER).toBe('image-compressor')
+    }
+  })
+
+  it('rejects a Cloudinary URL without credentials and keeps the value out of the error', () => {
+    for (const value of ['cloudinary://cloud', 'https://123:hidden-value@cloud', 'cloudinary://123:@cloud']) {
+      const parse = () => parseConfig(workerConfigSchema, { ...workerEnv, CLOUDINARY_URL: value })
+      expect(parse).toThrow(/CLOUDINARY_URL/)
+      expect(parse).not.toThrow(/hidden-value/)
+    }
   })
 
   it('rejects an unknown task delivery mode', () => {

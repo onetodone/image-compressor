@@ -1,11 +1,15 @@
 'use client'
 
 import type { JobStatus, JobSummary } from '@onetodone/image-compressor-shared'
-import type { ReactNode } from 'react'
+import Image from 'next/image'
+import { type ReactNode, useState } from 'react'
 
 import { BeforeAfter } from '@/components/before-after'
 import { useLiveJob } from '@/hooks/use-live-job'
+import { useResultUrl } from '@/hooks/use-result-url'
 import type { Upload } from '@/hooks/use-uploads'
+import { api } from '@/lib/api'
+import { ApiError } from '@/lib/api-error'
 import { formatBytes, savedPercent } from '@/lib/files'
 
 const STATUS_LABELS: Record<JobStatus, string> = {
@@ -22,14 +26,88 @@ const UPLOAD_LABELS: Record<Exclude<Upload['stage'], 'submitted' | 'rejected' | 
   submitting: 'Queuing…',
 }
 
-function Card({ name, children }: { name: string; children: ReactNode }) {
+function Card({ name, actions, children }: { name: string; actions?: ReactNode; children: ReactNode }) {
   return (
     <article className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <h3 className="truncate text-sm font-medium" title={name}>
-        {name}
-      </h3>
+      <header className="flex items-center justify-between gap-3">
+        <h3 className="min-w-0 truncate text-sm font-medium" title={name}>
+          {name}
+        </h3>
+        {actions}
+      </header>
       {children}
     </article>
+  )
+}
+
+const BUTTON =
+  'rounded-full border border-zinc-300 px-3 py-1 text-xs font-medium hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800'
+
+function actionError(error: unknown): string {
+  return error instanceof ApiError ? error.message : 'Something went wrong. Try again.'
+}
+
+/** Download (for finished jobs) and delete buttons, with the error of the last failed action. */
+function JobActions({ jobId, canDownload, onDeleted }: { jobId: string; canDownload: boolean; onDeleted: () => void }) {
+  const [busy, setBusy] = useState<'download' | 'delete' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function run(action: 'download' | 'delete') {
+    setBusy(action)
+    setError(null)
+    try {
+      if (action === 'download') {
+        // The URL is served as an attachment, so the browser saves the file and stays on the page.
+        window.location.assign((await api.downloadJob(jobId)).url)
+      } else {
+        await api.deleteJob(jobId)
+        onDeleted()
+        return
+      }
+    } catch (caught) {
+      setError(actionError(caught))
+    }
+    setBusy(null)
+  }
+
+  return (
+    <div className="flex shrink-0 flex-col items-end gap-1">
+      <div className="flex gap-2">
+        {canDownload && (
+          <button type="button" className={BUTTON} disabled={busy !== null} onClick={() => void run('download')}>
+            {busy === 'download' ? 'Preparing…' : 'Download'}
+          </button>
+        )}
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={busy !== null}
+          onClick={() => {
+            if (window.confirm('Delete this image and its compressed version?')) void run('delete')
+          }}
+        >
+          {busy === 'delete' ? 'Deleting…' : 'Delete'}
+        </button>
+      </div>
+      {error && (
+        <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** Small picture of a finished job: the CDN preview, or the result itself when there is no preview. */
+function Thumbnail({ job }: { job: JobSummary }) {
+  const done = job.status === 'done'
+  const resultUrl = useResultUrl(done && !job.previewUrl ? job.id : null)
+  const src = job.previewUrl ?? resultUrl
+  if (!done) return null
+  return (
+    <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-md bg-zinc-100 dark:bg-zinc-800">
+      {src && <Image src={src} alt="" fill sizes="64px" className="object-cover" />}
+    </div>
   )
 }
 
@@ -95,8 +173,10 @@ function JobState({ job, liveError }: { job: JobSummary; liveError: string | nul
 }
 
 /** A file picked in this session: upload progress, then the live job with a before/after view. */
-export function UploadCard({ upload }: { upload: Upload }) {
+export function UploadCard({ upload, onRemove }: { upload: Upload; onRemove: () => void }) {
   const { job, error } = useLiveJob(upload.stage === 'submitted' ? upload.jobId : null)
+  // The comparison shows the file the user downloads, not a CDN rendition of it.
+  const resultUrl = useResultUrl(job?.status === 'done' ? job.id : null)
 
   let body: ReactNode
   if (upload.stage === 'rejected' || upload.stage === 'error') body = <Problem>{upload.error}</Problem>
@@ -107,23 +187,42 @@ export function UploadCard({ upload }: { upload: Upload }) {
   } else if (!job) body = <Progress label={STATUS_LABELS.queued} value={null} />
   else body = <JobState job={job} liveError={error} />
 
+  // While the file is still being uploaded there is nothing to delete yet.
+  const settled = upload.stage === 'submitted' || upload.stage === 'error'
+  const actions =
+    upload.jobId && settled ? (
+      <JobActions jobId={upload.jobId} canDownload={job?.status === 'done'} onDeleted={onRemove} />
+    ) : upload.stage === 'rejected' ? (
+      <button type="button" className={BUTTON} onClick={onRemove}>
+        Dismiss
+      </button>
+    ) : null
+
   return (
-    <Card name={upload.name}>
+    <Card name={upload.name} actions={actions}>
       {body}
       {job?.status === 'done' && upload.objectUrl && (
-        <BeforeAfter before={upload.objectUrl} after={job.previewUrl} width={job.width} height={job.height} />
+        <BeforeAfter before={upload.objectUrl} after={resultUrl} width={job.width} height={job.height} />
       )}
     </Card>
   )
 }
 
 /** A job from an earlier visit, followed live while it is still running. */
-export function HistoryCard({ initial }: { initial: JobSummary }) {
+export function HistoryCard({ initial, onDeleted }: { initial: JobSummary; onDeleted: () => void }) {
   const { job, error } = useLiveJob(initial.id, initial)
   const current = job ?? initial
   return (
-    <Card name={current.originalName}>
-      <JobState job={current} liveError={error} />
+    <Card
+      name={current.originalName}
+      actions={<JobActions jobId={current.id} canDownload={current.status === 'done'} onDeleted={onDeleted} />}
+    >
+      <div className="flex items-center gap-3">
+        <Thumbnail job={current} />
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <JobState job={current} liveError={error} />
+        </div>
+      </div>
     </Card>
   )
 }

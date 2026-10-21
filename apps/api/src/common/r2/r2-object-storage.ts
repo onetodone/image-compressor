@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   NoSuchKey,
@@ -10,7 +11,13 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 import type { R2Config } from '../config/config.js'
 import type { CallTimer } from '../logging/call-timer.js'
-import { ObjectStorage, type PresignedUpload, type StoredObject, type UploadConstraints } from './object-storage.js'
+import {
+  type DownloadOptions,
+  ObjectStorage,
+  type PresignedUrl,
+  type StoredObject,
+  type UploadConstraints,
+} from './object-storage.js'
 
 /** {@link ObjectStorage} on Cloudflare R2 through its S3-compatible API. */
 export class R2ObjectStorage extends ObjectStorage {
@@ -33,7 +40,7 @@ export class R2ObjectStorage extends ObjectStorage {
     })
   }
 
-  async presignUpload(key: string, constraints: UploadConstraints, expiresInSeconds: number): Promise<PresignedUpload> {
+  async presignUpload(key: string, constraints: UploadConstraints, expiresInSeconds: number): Promise<PresignedUrl> {
     const command = new PutObjectCommand({
       Bucket: this.bucket,
       Key: key,
@@ -48,6 +55,17 @@ export class R2ObjectStorage extends ObjectStorage {
       signableHeaders: new Set(['content-type', 'content-length']),
     })
     return { url, expiresAt }
+  }
+
+  async presignDownload(key: string, options: DownloadOptions, expiresInSeconds: number): Promise<PresignedUrl> {
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      ResponseContentType: options.contentType,
+      ResponseContentDisposition: options.contentDisposition,
+    })
+    const expiresAt = new Date(Date.now() + expiresInSeconds * 1000)
+    return { url: await getSignedUrl(this.client, command, { expiresIn: expiresInSeconds }), expiresAt }
   }
 
   async head(key: string): Promise<StoredObject | null> {
@@ -78,6 +96,12 @@ export class R2ObjectStorage extends ObjectStorage {
   async put(key: string, body: Buffer, contentType: string): Promise<void> {
     await this.timer.measure('r2', 'putObject', () =>
       this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType })),
+    )
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.timer.measure('r2', 'deleteObject', () =>
+      this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key })),
     )
   }
 }

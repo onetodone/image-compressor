@@ -10,10 +10,17 @@ export interface UploadConstraints {
   contentLength: number
 }
 
-/** A URL that lets a client upload one object without credentials. */
-export interface PresignedUpload {
+/** A URL that lets a client upload or download one object without credentials. */
+export interface PresignedUrl {
   url: string
   expiresAt: Date
+}
+
+/** Response headers a presigned download is served with. */
+export interface DownloadOptions {
+  contentType: string
+  /** Full `Content-Disposition` header value. */
+  contentDisposition: string
 }
 
 /**
@@ -27,11 +34,13 @@ export abstract class ObjectStorage {
    * @param constraints headers signed into the URL
    * @param expiresInSeconds how long the URL stays valid
    */
-  abstract presignUpload(
-    key: string,
-    constraints: UploadConstraints,
-    expiresInSeconds: number,
-  ): Promise<PresignedUpload>
+  abstract presignUpload(key: string, constraints: UploadConstraints, expiresInSeconds: number): Promise<PresignedUrl>
+
+  /**
+   * Creates a presigned `GET` URL for `key` that is served with the given headers.
+   * @param expiresInSeconds how long the URL stays valid
+   */
+  abstract presignDownload(key: string, options: DownloadOptions, expiresInSeconds: number): Promise<PresignedUrl>
 
   /** Returns the size and type of an object, or `null` if it does not exist. */
   abstract head(key: string): Promise<StoredObject | null>
@@ -41,4 +50,7 @@ export abstract class ObjectStorage {
 
   /** Stores `body` under `key`, replacing any existing object. */
   abstract put(key: string, body: Buffer, contentType: string): Promise<void>
+
+  /** Deletes an object. Does nothing if it does not exist. */
+  abstract delete(key: string): Promise<void>
 }

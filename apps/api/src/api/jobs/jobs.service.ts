@@ -4,11 +4,16 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common'
 import {
   type CreateJobRequest,
   type CreateJobResponse,
+  DOWNLOAD_URL_TTL_SECONDS,
+  type DownloadJobQuery,
+  type DownloadJobResponse,
+  type InputType,
   type JobStatus,
   jobIdSchema,
   type ListJobsQuery,
@@ -20,22 +25,27 @@ import {
 } from '@onetodone/image-compressor-shared'
 import { type DocumentReference, FieldPath, FieldValue, Firestore, type Timestamp } from 'firebase-admin/firestore'
 
+import { ImageCdn } from '../../common/cloudinary/image-cdn.js'
 import { CallTimer } from '../../common/logging/call-timer.js'
 import { originalKey } from '../../common/r2/object-keys.js'
 import { ObjectStorage } from '../../common/r2/object-storage.js'
 import { TaskQueue } from '../../common/tasks/task-queue.js'
 import type { AuthUser } from '../auth/auth-user.js'
 import { QuotaService } from '../users/quota.service.js'
+import { contentDisposition, downloadFileName } from './content-disposition.js'
 import { decodeJobCursor, encodeJobCursor } from './job-cursor.js'
 
 const JOBS = 'jobs'
 
-/** Creates jobs with presigned uploads and submits them for compression. */
+/** Creates, submits, lists, downloads and deletes the jobs of the current user. */
 @Injectable()
 export class JobsService {
+  private readonly logger = new Logger(JobsService.name)
+
   constructor(
     private readonly firestore: Firestore,
     private readonly storage: ObjectStorage,
+    private readonly cdn: ImageCdn,
     private readonly tasks: TaskQueue,
     private readonly quota: QuotaService,
     private readonly timer: CallTimer,
@@ -140,6 +150,54 @@ export class JobsService {
 
     if (status === 'queued') await this.tasks.enqueueCompression(jobId)
     return { jobId, status }
+  }
+
+  /** Returns a short-lived URL of the compressed result, to save or to display in the browser. */
+  async download(user: AuthUser, jobId: string, { disposition }: DownloadJobQuery): Promise<DownloadJobResponse> {
+    const snapshot = await this.timer.measure('firestore', 'jobs.get', () => this.ref(jobId).get())
+    if (!snapshot.exists || snapshot.get('ownerId') !== user.uid) throw new NotFoundException('Job not found')
+    const outputKey = snapshot.get('outputKey') as string | null | undefined
+    if (snapshot.get('status') !== 'done' || !outputKey) throw new ConflictException('The job is not finished')
+
+    const type = snapshot.get('inputType') as InputType
+    const fileName = downloadFileName(snapshot.get('originalName') as string, type)
+    const download = await this.storage.presignDownload(
+      outputKey,
+      { contentType: type, contentDisposition: contentDisposition(disposition, fileName) },
+      DOWNLOAD_URL_TTL_SECONDS,
+    )
+    return { url: download.url, expiresAt: download.expiresAt.toISOString() }
+  }
+
+  /**
+   * Deletes the job document, then its files. The document goes first, so a worker still processing
+   * the job finds it gone and removes the files it creates itself. A file that cannot be removed is
+   * only logged: the job is already gone for the user, and the bucket lifecycle rules expire it.
+   */
+  async delete(user: AuthUser, jobId: string): Promise<void> {
+    const ref = this.ref(jobId)
+    const job = await this.timer.measure('firestore', 'jobs.delete', () =>
+      this.firestore.runTransaction(async (tx) => {
+        const snapshot = await tx.get(ref)
+        if (!snapshot.exists || snapshot.get('ownerId') !== user.uid) return null
+        tx.delete(ref)
+        return snapshot.data()!
+      }),
+    )
+    if (!job) throw new NotFoundException('Job not found')
+
+    const removals: [string, Promise<void>][] = [['original', this.storage.delete(job.inputKey as string)]]
+    if (typeof job.outputKey === 'string') removals.push(['result', this.storage.delete(job.outputKey)])
+    if (job.previewUrl != null) removals.push(['preview', this.cdn.delete(jobId)])
+    const results = await Promise.allSettled(removals.map(([, removal]) => removal))
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        this.logger.error(
+          { jobId, file: removals[index]![0], err: result.reason },
+          'Could not remove a file of a deleted job',
+        )
+      }
+    })
   }
 
   /** Returns the size of the uploaded original after checking it against the job. */
