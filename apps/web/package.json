@@ -3,15 +3,28 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @onetodone/image-compressor-shared build && next dev",
+    "build": "next build",
+    "typecheck": "next typegen && tsc --noEmit"
+  },
+  "dependencies": {
+    "@onetodone/image-compressor-shared": "workspace:*",
+    "firebase": "^13.0.0",
+    "next": "16.4.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zod": "catalog:"
+  },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "catalog:",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "eslint-config-next": "16.4.2",
     "prettier": "catalog:",
     "prettier-plugin-tailwindcss": "^0.8.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "catalog:"
-  },
-  "dependencies": {
-    "next": "16.4.2",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1"
   }
 }

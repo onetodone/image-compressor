@@ -2,12 +2,13 @@ import type { NestExpressApplication } from '@nestjs/platform-express'
 import {
   createJobResponseSchema,
   type CreateJobResponse,
+  listJobsResponseSchema,
   MAX_INPUT_BYTES,
   submitJobResponseSchema,
   UPLOAD_URL_TTL_SECONDS,
   utcDayKey,
 } from '@onetodone/image-compressor-shared'
-import { Firestore } from 'firebase-admin/firestore'
+import { Firestore, Timestamp } from 'firebase-admin/firestore'
 import request from 'supertest'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
@@ -206,6 +207,95 @@ describe('jobs', () => {
     it('answers 404 for unknown and malformed job ids', async () => {
       await submit('a1B2c3D4e5F6g7H8i9J0').expect(404)
       await submit('not-a-job-id').expect(404)
+    })
+  })
+
+  describe('GET /jobs', () => {
+    const list = (query = '', token = user.token) => http().get(`/jobs${query}`).set(auth(token))
+
+    /** Stores jobs created one second apart, oldest first, and returns their ids newest first. */
+    async function seedJobs(count: number, ownerId = user.uid): Promise<string[]> {
+      const ids: string[] = []
+      for (let i = 0; i < count; i++) {
+        const ref = firestore.collection('jobs').doc()
+        await ref.set({
+          ownerId,
+          status: 'done',
+          originalName: `photo-${i}.jpg`,
+          inputType: 'image/jpeg',
+          inputKey: `originals/${ownerId}/${ref.id}`,
+          inputBytes: 2048,
+          outputKey: `results/${ownerId}/${ref.id}.jpg`,
+          outputBytes: 1024,
+          width: 64,
+          height: 48,
+          previewUrl: null,
+          error: null,
+          createdAt: Timestamp.fromMillis(Date.UTC(2026, 9, 21, 10, 0, i)),
+          finishedAt: Timestamp.fromMillis(Date.UTC(2026, 9, 21, 10, 0, i, 500)),
+        })
+        ids.unshift(ref.id)
+      }
+      return ids
+    }
+
+    it('requires a token', async () => {
+      await http().get('/jobs').expect(401)
+    })
+
+    it("returns the user's jobs newest first without storage keys", async () => {
+      const ids = await seedJobs(3)
+      await seedJobs(2, 'someone-else')
+
+      const response = await list().expect(200)
+
+      const page = listJobsResponseSchema.parse(response.body)
+      expect(page.jobs.map((job) => job.id)).toEqual(ids)
+      expect(page.nextCursor).toBeNull()
+      expect(page.jobs[0]).toEqual({
+        id: ids[0],
+        status: 'done',
+        originalName: 'photo-2.jpg',
+        inputType: 'image/jpeg',
+        inputBytes: 2048,
+        outputBytes: 1024,
+        width: 64,
+        height: 48,
+        previewUrl: null,
+        error: null,
+        createdAt: '2026-10-21T10:00:02.000Z',
+        finishedAt: '2026-10-21T10:00:02.500Z',
+      })
+      expect(response.body.jobs[0]).not.toHaveProperty('inputKey')
+    })
+
+    it('pages through all jobs with the cursor', async () => {
+      const ids = await seedJobs(5)
+
+      const first = listJobsResponseSchema.parse((await list('?limit=2').expect(200)).body)
+      const second = listJobsResponseSchema.parse((await list(`?limit=2&cursor=${first.nextCursor}`).expect(200)).body)
+      const third = listJobsResponseSchema.parse((await list(`?limit=2&cursor=${second.nextCursor}`).expect(200)).body)
+
+      expect([...first.jobs, ...second.jobs, ...third.jobs].map((job) => job.id)).toEqual(ids)
+      expect(third.nextCursor).toBeNull()
+    })
+
+    it('includes a job created through the API', async () => {
+      const { jobId } = await createJob()
+
+      const page = listJobsResponseSchema.parse((await list().expect(200)).body)
+
+      expect(page.jobs).toEqual([expect.objectContaining({ id: jobId, status: 'awaiting_upload', inputBytes: null })])
+    })
+
+    it('returns an empty page for a user without jobs', async () => {
+      expect((await list().expect(200)).body).toEqual({ jobs: [], nextCursor: null })
+    })
+
+    it('rejects an invalid cursor or page size', async () => {
+      await list('?cursor=garbage').expect(400)
+      await list('?limit=0').expect(400)
+      await list('?limit=51').expect(400)
     })
   })
 })

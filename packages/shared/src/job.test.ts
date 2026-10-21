@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { createJobRequestSchema, inputTypeSchema, jobIdSchema, jobStatusSchema, MAX_INPUT_BYTES } from './job.js'
+import {
+  createJobRequestSchema,
+  inputTypeSchema,
+  jobIdSchema,
+  jobStatusSchema,
+  listJobsQuerySchema,
+  MAX_INPUT_BYTES,
+  toJobSummary,
+} from './job.js'
 
 describe('jobStatusSchema', () => {
   it('accepts every known status', () => {
@@ -64,6 +72,69 @@ describe('jobIdSchema', () => {
   it('rejects ids that could address another document path', () => {
     for (const id of ['short', 'a1B2c3D4e5F6g7H8i9J/', '../users/a1B2c3D4e5F']) {
       expect(jobIdSchema.safeParse(id).success).toBe(false)
+    }
+  })
+})
+
+describe('toJobSummary', () => {
+  const timestamp = (iso: string) => ({ toDate: () => new Date(iso) })
+  const id = 'a1B2c3D4e5F6g7H8i9J0'
+
+  it('maps a finished job and leaves storage details out', () => {
+    const summary = toJobSummary(id, {
+      ownerId: 'uid',
+      status: 'done',
+      originalName: 'photo.jpg',
+      inputType: 'image/jpeg',
+      inputKey: 'originals/uid/id',
+      inputBytes: 2048,
+      outputKey: 'results/uid/id.jpg',
+      outputBytes: 512,
+      width: 64,
+      height: 48,
+      previewUrl: null,
+      error: null,
+      createdAt: timestamp('2026-10-21T10:00:00.000Z'),
+      finishedAt: timestamp('2026-10-21T10:00:05.000Z'),
+    })
+
+    expect(summary).toEqual({
+      id,
+      status: 'done',
+      originalName: 'photo.jpg',
+      inputType: 'image/jpeg',
+      inputBytes: 2048,
+      outputBytes: 512,
+      width: 64,
+      height: 48,
+      previewUrl: null,
+      error: null,
+      createdAt: '2026-10-21T10:00:00.000Z',
+      finishedAt: '2026-10-21T10:00:05.000Z',
+    })
+  })
+
+  it('treats fields missing from older documents as empty', () => {
+    const summary = toJobSummary(id, {
+      status: 'queued',
+      originalName: 'graphic.png',
+      inputType: 'image/png',
+      createdAt: timestamp('2026-10-21T10:00:00.000Z'),
+    })
+
+    expect(summary).toMatchObject({ inputBytes: null, outputBytes: null, previewUrl: null, finishedAt: null })
+  })
+})
+
+describe('listJobsQuerySchema', () => {
+  it('uses the default page size and coerces a limit from the query string', () => {
+    expect(listJobsQuerySchema.parse({})).toEqual({ limit: 20 })
+    expect(listJobsQuerySchema.parse({ limit: '5', cursor: 'abc' })).toEqual({ limit: 5, cursor: 'abc' })
+  })
+
+  it('rejects page sizes outside 1 to 50', () => {
+    for (const limit of ['0', '51', 'ten']) {
+      expect(listJobsQuerySchema.safeParse({ limit }).success).toBe(false)
     }
   })
 })

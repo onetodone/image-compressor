@@ -72,3 +72,85 @@ export const submitJobResponseSchema = z.object({
 
 /** Response of `POST /jobs/:id/submit`: the job and its status after the submit. */
 export type SubmitJobResponse = z.infer<typeof submitJobResponseSchema>
+
+/** Validates a job as shown to its owner. Storage keys and internal bookkeeping are left out. */
+export const jobSummarySchema = z.object({
+  id: jobIdSchema,
+  status: jobStatusSchema,
+  originalName: z.string(),
+  /** Declared type until the worker detects the real one. */
+  inputType: inputTypeSchema,
+  inputBytes: z.number().int().nonnegative().nullable(),
+  outputBytes: z.number().int().nonnegative().nullable(),
+  width: z.number().int().positive().nullable(),
+  height: z.number().int().positive().nullable(),
+  previewUrl: z.url().nullable(),
+  /** User-safe reason of a failed job. */
+  error: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+  finishedAt: z.iso.datetime().nullable(),
+})
+
+/** A job as shown to its owner. */
+export type JobSummary = z.infer<typeof jobSummarySchema>
+
+/** A Firestore timestamp from either the Admin or the client SDK. */
+export interface TimestampLike {
+  toDate(): Date
+}
+
+/**
+ * Builds the owner's view of a `jobs/{jobId}` document. Works with data from the Admin and the client
+ * SDK, and treats fields missing from older documents as empty.
+ * @param id document id
+ * @param data document data
+ */
+export function toJobSummary(id: string, data: Record<string, unknown>): JobSummary {
+  const iso = (value: unknown) => (isTimestamp(value) ? value.toDate().toISOString() : null)
+  const orNull = (value: unknown) => value ?? null
+  return jobSummarySchema.parse({
+    id,
+    status: data.status,
+    originalName: data.originalName,
+    inputType: data.inputType,
+    inputBytes: orNull(data.inputBytes),
+    outputBytes: orNull(data.outputBytes),
+    width: orNull(data.width),
+    height: orNull(data.height),
+    previewUrl: orNull(data.previewUrl),
+    error: orNull(data.error),
+    createdAt: iso(data.createdAt),
+    finishedAt: iso(data.finishedAt),
+  })
+}
+
+function isTimestamp(value: unknown): value is TimestampLike {
+  return typeof value === 'object' && value !== null && typeof (value as TimestampLike).toDate === 'function'
+}
+
+/** Default number of jobs per page of `GET /jobs`. */
+export const JOBS_PAGE_SIZE = 20
+
+/** Largest number of jobs per page of `GET /jobs`. */
+export const MAX_JOBS_PAGE_SIZE = 50
+
+/** Validates the query of `GET /jobs`. */
+export const listJobsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(MAX_JOBS_PAGE_SIZE).default(JOBS_PAGE_SIZE),
+  /** Opaque `nextCursor` of the previous page. */
+  cursor: z.string().min(1).max(200).optional(),
+})
+
+/** Query of `GET /jobs`. */
+export type ListJobsQuery = z.infer<typeof listJobsQuerySchema>
+
+/** Validates the response of `GET /jobs`. */
+export const listJobsResponseSchema = z.object({
+  /** The user's jobs, newest first. */
+  jobs: z.array(jobSummarySchema),
+  /** Cursor of the next page, or `null` on the last page. */
+  nextCursor: z.string().nullable(),
+})
+
+/** Response of `GET /jobs`: one page of the user's jobs. */
+export type ListJobsResponse = z.infer<typeof listJobsResponseSchema>
