@@ -42,8 +42,11 @@ services:
       FIREBASE_AUTH_EMULATOR_HOST: emulators:9099
       FIRESTORE_EMULATOR_HOST: emulators:8080
       METADATA_SERVER_DETECTION: none
+      TASKS_MODE: direct
+      WORKER_URL: http://worker:8080
     depends_on:
       - emulators
+      - worker
     ports:
       - '3001:8080'
 

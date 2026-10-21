@@ -27,6 +27,14 @@ pnpm dev
 
 Locally the API uses the Firebase Auth and Firestore emulators (UI on http://127.0.0.1:4000). Every route except `GET /health` requires a Firebase ID token in `Authorization: Bearer <token>`.
 
+Uploads go to a real Cloudflare R2 bucket: fill in the `R2_*` variables in `.env` as described in [`infra/r2/README.md`](infra/r2/README.md).
+
+### Uploading an image
+
+1. `POST /jobs` with `{ "originalName", "contentType", "size" }` returns `jobId` and a presigned `uploadUrl`, valid for 10 minutes.
+2. `PUT` the file to `uploadUrl` with the same `Content-Type`. R2 rejects a body whose type or size differs from the declared one.
+3. `POST /jobs/:id/submit` checks the upload, counts the job against the daily quota and queues it for compression.
+
 ## Scripts
 
 | Script | Description |
@@ -50,7 +58,7 @@ Locally the API uses the Firebase Auth and Firestore emulators (UI on http://127
 docker compose up --build
 ```
 
-Compose also starts the Firebase Auth and Firestore emulators (ports 9099 and 8080), so the stack runs without a Google Cloud project.
+Compose also starts the Firebase Auth and Firestore emulators (ports 9099 and 8080), so the stack runs without a Google Cloud project. The API reads the `R2_*` variables from `.env`.
 
 ## Repository layout
 
@@ -60,7 +68,7 @@ apps/
   api/        NestJS API and worker
 packages/
   shared/     zod schemas, job status and quota limits shared by web and api
-infra/        Firebase config, Firestore rules and indexes, deployment scripts
+infra/        Firebase config, Firestore rules and indexes, R2 setup, deployment scripts
 ```
 
 ## License

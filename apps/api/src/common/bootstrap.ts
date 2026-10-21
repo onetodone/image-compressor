@@ -10,7 +10,11 @@ import { Logger } from 'nestjs-pino'
  * graceful shutdown on `SIGTERM`.
  */
 export async function createApp(module: DynamicModule): Promise<NestExpressApplication> {
-  const app = await NestFactory.create<NestExpressApplication>(module, { bufferLogs: true })
+  return configureApp(await NestFactory.create<NestExpressApplication>(module, { bufferLogs: true }))
+}
+
+/** Applies the logger, proxy and shutdown settings of {@link createApp} to an existing application. */
+export function configureApp(app: NestExpressApplication): NestExpressApplication {
   app.useLogger(app.get(Logger))
   app.disable('x-powered-by')
   // Cloud Run's front end appends the client address as the last X-Forwarded-For entry.
