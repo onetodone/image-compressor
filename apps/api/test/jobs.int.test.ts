@@ -79,6 +79,7 @@ describe('jobs', () => {
         inputBytes: null,
         outputKey: null,
         attempts: 0,
+        quotaDayKey: null,
         quotaRefunded: false,
         createdAt: expect.anything(),
         finishedAt: null,
@@ -120,7 +121,7 @@ describe('jobs', () => {
       const response = await submit(jobId).expect(200)
 
       expect(submitJobResponseSchema.parse(response.body)).toEqual({ jobId, status: 'queued' })
-      expect(await job(jobId)).toMatchObject({ status: 'queued', inputBytes: 2048 })
+      expect(await job(jobId)).toMatchObject({ status: 'queued', inputBytes: 2048, quotaDayKey: utcDayKey(new Date()) })
       expect(await jobsToday()).toBe(1)
       expect(tasks.enqueued).toEqual([jobId])
     })
