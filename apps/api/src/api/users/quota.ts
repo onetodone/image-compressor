@@ -1,0 +1,24 @@
+import { dailyJobLimit, jobsUsedToday, type Quota, utcDayKey } from '@onetodone/image-compressor-shared'
+
+/** Quota counters as stored in `users/{uid}`. */
+export interface StoredUsage {
+  dayKey: string
+  jobsToday: number
+}
+
+/** Reads the quota counters from a `users/{uid}` document, ignoring missing or malformed fields. */
+export function readStoredUsage(data: Record<string, unknown> | undefined): StoredUsage | undefined {
+  if (typeof data?.dayKey !== 'string' || typeof data.jobsToday !== 'number') return undefined
+  return { dayKey: data.dayKey, jobsToday: data.jobsToday }
+}
+
+/** Computes today's quota; counters from an earlier UTC day count as zero. */
+export function currentQuota(stored: StoredUsage | undefined, isAnonymous: boolean, now: Date): Quota {
+  return { dayKey: utcDayKey(now), used: jobsUsedToday(stored, now), limit: dailyJobLimit(isAnonymous) }
+}
+
+/** Returns the quota after submitting one more job today, or `null` if the daily limit is reached. */
+export function consumeQuota(stored: StoredUsage | undefined, isAnonymous: boolean, now: Date): Quota | null {
+  const quota = currentQuota(stored, isAnonymous, now)
+  return quota.used < quota.limit ? { ...quota, used: quota.used + 1 } : null
+}

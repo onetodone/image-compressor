@@ -12,13 +12,38 @@ x-app: &app
   restart: unless-stopped
 
 services:
+  # Firebase Auth and Firestore emulators, so the stack runs without a Google Cloud project.
+  emulators:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM node:24-trixie-slim
+        RUN apt-get update \
+          && apt-get install -y --no-install-recommends openjdk-21-jre-headless \
+          && rm -rf /var/lib/apt/lists/*
+        RUN npm install -g firebase-tools@15.34.0
+        WORKDIR /app
+        COPY infra infra
+        RUN sed -i 's/127.0.0.1/0.0.0.0/g' infra/firebase.json
+        CMD ["firebase", "emulators:start", "--config", "infra/firebase.json", "--project", "demo-image-compressor", "--only", "auth,firestore"]
+    image: image-compressor-emulators:local
+    ports:
+      - '9099:9099'
+      - '8080:8080'
+    restart: unless-stopped
+
   api:
     <<: *app
     environment:
       NODE_ENV: production
       PORT: 8080
-      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-demo-image-compressor}
+      GCP_PROJECT_ID: demo-image-compressor
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      FIREBASE_AUTH_EMULATOR_HOST: emulators:9099
+      FIRESTORE_EMULATOR_HOST: emulators:8080
+      METADATA_SERVER_DETECTION: none
+    depends_on:
+      - emulators
     ports:
       - '3001:8080'
 

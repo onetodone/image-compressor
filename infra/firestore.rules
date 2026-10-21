@@ -1,0 +1,17 @@
+rules_version = '2';
+
+// The API and worker use firebase-admin, which bypasses these rules. They only govern
+// what the browser can do directly: read its own documents for live updates.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /jobs/{jobId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /users/{uid} {
+      allow read: if request.auth != null && uid == request.auth.uid;
+      allow write: if false;
+    }
+  }
+}
